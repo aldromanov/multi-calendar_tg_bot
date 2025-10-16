@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+
+# Logs
+*.log
+
+# Docker
+*.pid
+*.sock
+*.sqlite3
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Database volumes
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Credentials and tokens
+credentials.json
+*.pickle
