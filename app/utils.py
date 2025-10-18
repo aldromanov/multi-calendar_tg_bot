@@ -1,17 +1,15 @@
 import datetime as dt
 
-from config import TZINFO, AHEAD_HOUR
+from config import TZINFO, AHEAD_HOUR, WEEKDAY
 
 
 def format_event(ev: dict, name_width: int = 25) -> str:
-    start = ev.get("start")
+    start: dt.datetime = ev["start"]
     now = dt.datetime.now(TZINFO)
     mark = "⌛️" if start < now else "📌"
 
-    try:
-        start_str = start.strftime("%d.%m %H:%M")
-    except Exception:
-        start_str = str(start)
+    start_str = start.strftime("%d.%m %H:%M")
+    weekday_str = WEEKDAY[start.weekday()]
 
     summary = ev.get("summary", "(без названия)")
     if len(summary) > name_width:
@@ -19,7 +17,7 @@ def format_event(ev: dict, name_width: int = 25) -> str:
 
     summary_padded = summary.ljust(name_width)
 
-    return f"<code>{mark} {start_str} | {summary_padded}</code>"
+    return f"<code>{mark} {start_str} ({weekday_str}) | {summary_padded}</code>"
 
 
 def get_user_id(user):

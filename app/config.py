@@ -54,3 +54,6 @@ DATABASE_URL: str = os.environ.get(
 
 # Google API scopes
 SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar.readonly"]
+
+# RU weekday
+WEEKDAY = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}
