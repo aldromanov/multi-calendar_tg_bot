@@ -27,16 +27,19 @@ def format_confirmed_message(original_text: str) -> str:
     """
     Возвращает отформатированный текст подтверждённого события.
     """
-    parts = original_text.split("\n", 2)
-    if len(parts) < 3:
-        return f"🎯 <b>Событие подтверждено</b>\n<code>{original_text}</code>"
+    parts = original_text.split("\n", 4)
+    if len(parts) < 4:
+        return f"🎯 <b>Событие подтверждено</b>\n\n<code>{original_text}</code>"
 
     header = (
         parts[0]
         .replace("⏰ Скоро событие", "🎯 <b>Событие подтверждено</b>")
         .replace("⚡ Скоро событие", "🎯 <b>Событие подтверждено</b>")
     )
-    return f"{header}\n<b>{parts[1]}</b>\n<code>{parts[2]}</code>"
+    sub = parts[2].split(" ", 1)
+    sub_header = f"{sub[0]} <u><b>{sub[1]}</b></u>"
+    text = f"<code>{parts[3]}</code>"
+    return f"{header}\n\n{sub_header}\n{text}"
 
 
 class TelegramBot:
@@ -266,10 +269,10 @@ class TelegramBot:
         :param events_dict: Словарь событий по календарям.
         """
         out: list[str] = []
-        header = f"📅 <b>События {label}</b>\n"
+        header = f"📅 <b>События <u>{label}</u></b>\n"
         for name, evs in events_dict.items():
             if evs:
-                out.append(f"\n<b>{name}</b>")
+                out.append(f"\n👤 <u><b>{name}</b></u>")
                 out += [format_event(e) for e in evs]
 
         if out:
