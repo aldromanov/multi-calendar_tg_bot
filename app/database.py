@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import create_engine, Column, String, DateTime, Boolean
+from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from config import DATABASE_URL, logger, TZINFO
@@ -16,22 +16,24 @@ SessionLocal = sessionmaker(
 
 class SeenEvent(Base):
     """
-    Модель для хранения событий, о которых уже уведомили.
+    Модель для хранения информации о событиях и статусе уведомлений.
 
     Attributes:
-        event_id (str): ID события.
-        notified_at (datetime): Время уведомления.
-        notified (bool): Статус уведомления.
-        confirmed (bool): Статус подтверждения.
+        event_id (str): Уникальный идентификатор события.
+        start (datetime): Время начала события.
+        notified_at (datetime): Время, когда было отправлено уведомление.
+        last_point (int, optional): Последняя точка уведомления в минутах до события, для которой уже отправлено уведомление.
+        confirmed (bool): Статус подтверждения события. True, если пользователь подтвердил событие.
     """
 
     __tablename__ = "seen_events"
     event_id = Column(String, primary_key=True, index=True)
+    start = Column(DateTime(timezone=True))
     notified_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.datetime.now(TZINFO),
     )
-    notified = Column(Boolean, default=False)
+    last_point = Column(Integer, nullable=True)
     confirmed = Column(Boolean, default=False)
 
 
