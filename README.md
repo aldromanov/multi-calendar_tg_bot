@@ -165,6 +165,64 @@ docker-compose up --build -d
 
 ---
 
+## 🛠️ Настройка автозапуска через systemd
+
+Чтобы бот запускался автоматически при старте системы, можно создать сервис `systemd`.  
+
+### 1. Создать unit-файл
+
+Сохрани файл `/etc/systemd/system/your_project.service`:
+
+```ini
+[Unit]
+Description=Google Calendar Notifier Bot
+After=docker.service
+Requires=docker.service
+
+[Service]
+WorkingDirectory=/home/user/your_project
+ExecStartPre=/bin/bash -c 'sleep $((30 - $(date +%%S) % 60))'
+ExecStart=/usr/bin/docker-compose up
+ExecStop=/usr/bin/docker-compose down
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> ⚠️ Замени `/home/user/your_project` на путь к твоему проекту.
+
+### 2. Перезагрузить systemd и включить сервис
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable your_project.service
+sudo systemctl start your_project.service
+```
+
+### 3. Проверка статуса
+
+```bash
+sudo systemctl status your_project.service
+```
+
+### 4. Управление сервисом
+
+```bash
+# Перезапуск
+sudo systemctl restart your_project.service
+
+# Остановка
+sudo systemctl stop your_project.service
+
+# Просмотр логов
+journalctl -u your_project.service -f
+```
+
+---
+
 ## 🪪 Автор
 
 **Проект:** Google Calendar Multi-Notifier  
