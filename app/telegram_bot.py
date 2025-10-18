@@ -16,30 +16,10 @@ from config import (
     logger,
     NOTIFY_CHAT_ID,
     CHECK_INTERVAL,
-    AHEAD_MINUTES,
 )
 from database import SessionLocal, SeenEvent
 from notifier_worker import NotifierWorker
 from utils import format_event, get_user_id
-
-
-def format_confirmed_message(original_text: str) -> str:
-    """
-    Возвращает отформатированный текст подтверждённого события.
-    """
-    parts = original_text.split("\n", 4)
-    if len(parts) < 4:
-        return f"🎯 <b>Событие подтверждено</b>\n\n<code>{original_text}</code>"
-
-    header = (
-        parts[0]
-        .replace("⏰ Скоро событие", "🎯 <b>Событие подтверждено</b>")
-        .replace("⚡ Скоро событие", "🎯 <b>Событие подтверждено</b>")
-    )
-    sub = parts[2].split(" ", 1)
-    sub_header = f"{sub[0]} <u><b>{sub[1]}</b></u>"
-    text = f"<code>{parts[3]}</code>"
-    return f"{header}\n\n{sub_header}\n{text}"
 
 
 class TelegramBot:
@@ -88,9 +68,7 @@ class TelegramBot:
 
         async def start_scheduler():
             self.scheduler.start()
-            logger.info(
-                f"Scheduler уведомлений запущен (интервал {CHECK_INTERVAL} сек., оповещение за {AHEAD_MINUTES} мин.)"
-            )
+            logger.info(f"Scheduler уведомлений запущен (интервал {CHECK_INTERVAL} сек.)")
 
         self.start_scheduler_task = start_scheduler
 
@@ -175,7 +153,7 @@ class TelegramBot:
         await query.answer("Событие подтверждено ✅")
         await query.edit_message_reply_markup(reply_markup=None)
 
-        new_text = format_confirmed_message(query.message.text or "")
+        new_text = self.notifier.format_confirmed_message(query.message.text or "")
         await query.edit_message_text(
             new_text,
             parse_mode="HTML",

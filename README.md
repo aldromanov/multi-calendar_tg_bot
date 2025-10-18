@@ -83,9 +83,8 @@ CALENDAR_TOKENS={
 
 # Scheduler / timing settings
 CHECK_INTERVAL=60         # seconds between checks
-AHEAD_MINUTES=360         # minutes ahead to notify
-REPEAT_MINUTES=10         # minutes repeat to notify
-BUTTON_TTL=30             # seconds button lifetime
+AHEAD_HOUR=8              # hour ahead to notify
+BUTTON_TTL=120            # seconds button lifetime
 
 # Timezone
 TIMEZONE=Europe/Moscow

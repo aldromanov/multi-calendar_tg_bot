@@ -30,9 +30,8 @@ CALENDAR_TOKENS: dict = json.loads(RAW_CALENDAR_TOKENS)
 
 # Scheduler / timing settings
 CHECK_INTERVAL: int = int(os.environ.get("CHECK_INTERVAL", "60"))
-AHEAD_MINUTES: int = int(os.environ.get("AHEAD_MINUTES", "360"))
-REPEAT_MINUTES: int = int(os.environ.get("REPEAT_MINUTES", "60"))
-BUTTON_TTL: int = int(os.environ.get("BUTTON_TTL", "30"))
+AHEAD_HOUR: int = int(os.environ.get("AHEAD_HOUR", "8"))
+BUTTON_TTL: int = int(os.environ.get("BUTTON_TTL", "120"))
 
 # Timezone
 TIMEZONE: str = os.environ.get("TIMEZONE", "Europe/Moscow")
@@ -55,3 +54,6 @@ DATABASE_URL: str = os.environ.get(
 
 # Google API scopes
 SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar.readonly"]
+
+# RU weekday
+WEEKDAY = {0: "Пн", 1: "Вт", 2: "Ср", 3: "Чт", 4: "Пт", 5: "Сб", 6: "Вс"}

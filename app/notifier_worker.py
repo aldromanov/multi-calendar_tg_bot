@@ -3,9 +3,9 @@ import datetime as dt
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
-from config import TZINFO, logger, BUTTON_TTL, AHEAD_MINUTES, REPEAT_MINUTES
+from config import TZINFO, logger, BUTTON_TTL, AHEAD_HOUR
 from database import SessionLocal, SeenEvent
-from utils import format_event
+from utils import format_event, get_notify_time
 
 
 class NotifierWorker:
@@ -28,7 +28,7 @@ class NotifierWorker:
         self.scheduler = scheduler
         self.Session = SessionLocal
 
-    async def send_event_notification(self, ev: dict, name: str, session, icon: str) -> None:
+    async def send_event_notification(self, ev: dict, name: str, session, icon: str, confirmable: bool) -> None:
         """
         Отправка уведомления о событии в Telegram с кнопкой подтверждения.
         """
@@ -39,12 +39,15 @@ class NotifierWorker:
             return
 
         event_text = format_event(ev)
-        html_text = f"{icon} <b>Скоро событие</b>\n\n👤 <u><b>{name}</b></u>\n{event_text}"
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("✅ Подтвердить", callback_data=ev_hash)],
-            ]
-        )
+        label = "<b>Cобытие началось</b>" if icon == "🆘" else "<b>Скоро событие</b>"
+        html_text = f"{icon} {label}\n\n👤 <u><b>{name}</b></u>\n{event_text}"
+        keyboard = None
+        if confirmable:
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("✅ Подтвердить", callback_data=ev_hash)],
+                ]
+            )
 
         message = await self.bot_app.bot.send_message(
             chat_id=self.chat_id,
@@ -54,17 +57,18 @@ class NotifierWorker:
             disable_web_page_preview=False,
         )
 
-        self.scheduler.add_job(
-            self.bot_app.bot.edit_message_reply_markup,
-            "date",
-            run_date=dt.datetime.now() + dt.timedelta(seconds=BUTTON_TTL),
-            kwargs={
-                "chat_id": self.chat_id,
-                "message_id": message.message_id,
-                "reply_markup": None,
-            },
-        )
-        logger.info(f"Задача удаления кнопки через {BUTTON_TTL} сек добавлена для {ev_hash}")
+        if confirmable:
+            self.scheduler.add_job(
+                self.bot_app.bot.edit_message_reply_markup,
+                "date",
+                run_date=dt.datetime.now() + dt.timedelta(seconds=BUTTON_TTL),
+                kwargs={
+                    "chat_id": self.chat_id,
+                    "message_id": message.message_id,
+                    "reply_markup": None,
+                },
+            )
+            logger.info(f"Задача удаления кнопки через {BUTTON_TTL} сек добавлена для {ev_hash}")
 
     async def check_and_notify(self) -> None:
         """
@@ -72,7 +76,7 @@ class NotifierWorker:
         """
         logger.info("Проверка событий...")
         now = dt.datetime.now(TZINFO)
-        window_end = now + dt.timedelta(minutes=AHEAD_MINUTES)
+        window_end = now + dt.timedelta(hours=AHEAD_HOUR)
         session = self.Session()
 
         try:
@@ -88,36 +92,64 @@ class NotifierWorker:
                 start_raw = ev.get("start")
                 if not start_raw:
                     continue
-
                 start_dt = start_raw.astimezone(TZINFO)
-                send_again = False
+
+                if record and record.confirmed:
+                    continue
+
+                minutes_left = int((start_dt - now).total_seconds() / 60)
+                if minutes_left < 0:
+                    continue
+
+                send = False
+                confirmable = False
                 icon = "⏰"
 
-                if now <= start_dt <= window_end:
-                    if record:
-                        if not record.confirmed:
-                            delta = now - record.notified_at.astimezone(TZINFO)
-                            if delta.total_seconds() >= REPEAT_MINUTES * 60:
-                                send_again = True
-                                icon = "⚡"
-                    else:
-                        send_again = True
+                all_points = get_notify_time()
+                next_point = next_point = next((p for p in all_points if p == minutes_left), None)
 
-                if send_again:
-                    await self.send_event_notification(ev, name, session, icon)
-                    if record:
-                        record.notified_at = now
-                        record.notified = True
-                    else:
-                        new_record = SeenEvent(
-                            event_id=ev_hash,
-                            notified=True,
-                            confirmed=False,
-                            notified_at=now,
-                        )
-                        session.add(new_record)
+                if next_point is not None:
+                    if not record or record.last_point is None or next_point < record.last_point:
+                        send = True
+                        if not record:
+                            record = SeenEvent(
+                                event_id=ev_hash,
+                                start=start_dt,
+                                last_point=next_point,
+                                notified_at=start_dt - dt.timedelta(minutes=next_point),
+                                confirmed=False,
+                            )
+                            session.add(record)
+                        else:
+                            record.last_point = next_point
+                            record.notified_at = start_dt - dt.timedelta(minutes=next_point)
+
+                if minutes_left > 60:
+                    icon = "⏰"
+                    confirmable = False
+                elif 0 < minutes_left <= 30:
+                    icon = "⚡"
+                    confirmable = True
+                elif minutes_left == 0:
+                    icon = "🆘"
+                    confirmable = False
+
+                if send:
+                    await self.send_event_notification(ev, name, session, icon, confirmable)
 
             session.commit()
         finally:
             session.close()
             logger.info("Проверка событий завершена.")
+
+    @staticmethod
+    def format_confirmed_message(original_text: str) -> str:
+        """
+        Возвращает отформатированный текст подтверждённого события.
+        """
+        parts = original_text.split("\n", 4)
+        header = parts[0].replace("⚡ Скоро событие", "🎯 <b>Событие подтверждено</b>")
+        sub = parts[2].split(" ", 1)
+        sub_header = f"{sub[0]} <u><b>{sub[1]}</b></u>"
+        text = f"<code>{parts[3]}</code>"
+        return f"{header}\n\n{sub_header}\n{text}"
