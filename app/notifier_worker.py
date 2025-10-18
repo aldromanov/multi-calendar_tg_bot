@@ -39,7 +39,7 @@ class NotifierWorker:
             return
 
         event_text = format_event(ev)
-        html_text = f"{icon} <b>Скоро событие</b>\n<b>{name}</b>\n{event_text}"
+        html_text = f"{icon} <b>Скоро событие</b>\n\n👤 <u><b>{name}</b></u>\n{event_text}"
         keyboard = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("✅ Подтвердить", callback_data=ev_hash)],
