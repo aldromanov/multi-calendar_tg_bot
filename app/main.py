@@ -1,6 +1,6 @@
 import asyncio
 
-from database import init_db
+from database import init_db, weekly_cleanup
 from config import logger, CALENDAR_TOKENS
 from multicalendar import MultiCalendarManager
 from telegram_bot import TelegramBot
@@ -15,6 +15,7 @@ def main():
     bot.set_calendar_client(cal_manager)
     logger.info("Запуск Telegram бота...")
     loop = asyncio.get_event_loop()
+    loop.create_task(weekly_cleanup())
 
     try:
         loop.create_task(bot.start_scheduler_task())
