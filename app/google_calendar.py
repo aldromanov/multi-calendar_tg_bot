@@ -5,6 +5,7 @@ import pickle
 from typing import List, Dict
 
 from googleapiclient.discovery import build, Resource
+from google.auth.transport.requests import Request
 
 from config import TZINFO, logger
 
@@ -39,7 +40,12 @@ class GoogleCalendarClient:
 
         with open(self.token_path, "rb") as f:
             self.creds = pickle.load(f)
-
+        if self.creds and self.creds.expired and self.creds.refresh_token:
+            logger.info("🔄 Обновление просроченного токена...")
+            self.creds.refresh(Request())
+            with open(self.token_path, "wb") as f:
+                pickle.dump(self.creds, f)
+            logger.info("✅ Токен обновлён и сохранён.")
         self.service = build("calendar", "v3", credentials=self.creds)
         logger.info("Google Calendar API клиент готов к работе.")
 

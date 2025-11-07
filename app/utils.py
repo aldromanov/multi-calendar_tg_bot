@@ -1,6 +1,6 @@
 import datetime as dt
 
-from config import TZINFO, AHEAD_HOUR, WEEKDAY
+from config import TZINFO, WEEKDAY
 
 
 def format_event(ev: dict, name_width: int = 25) -> str:
@@ -26,7 +26,7 @@ def get_user_id(user):
     return f"{username} ({id})"
 
 
-def get_notify_time(ahead_hours: int = AHEAD_HOUR) -> list[int]:
+def get_notify_time(ahead_hours: int = 2) -> list[int]:
     geometry = [ahead_hours * 60]
     while geometry[-1] > 60:
         next_val = max(60, geometry[-1] // 2)

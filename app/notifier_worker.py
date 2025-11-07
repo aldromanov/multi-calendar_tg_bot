@@ -105,7 +105,7 @@ class NotifierWorker:
                 confirmable = False
                 icon = "⏰"
 
-                all_points = get_notify_time()
+                all_points = get_notify_time(AHEAD_HOUR)
                 next_point = next_point = next((p for p in all_points if p == minutes_left), None)
 
                 if next_point is not None:
