@@ -6,7 +6,7 @@ from config import TZINFO, WEEKDAY
 def format_event(ev: dict, name_width: int = 25) -> str:
     start: dt.datetime = ev["start"]
     now = dt.datetime.now(TZINFO)
-    mark = "⌛️" if start < now else "📌"
+    mark = "☑️" if start < now else "📌"
 
     start_str = start.strftime("%d.%m %H:%M")
     weekday_str = WEEKDAY[start.weekday()]

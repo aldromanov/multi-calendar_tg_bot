@@ -40,14 +40,25 @@ class GoogleCalendarClient:
 
         with open(self.token_path, "rb") as f:
             self.creds = pickle.load(f)
-        if self.creds and self.creds.expired and self.creds.refresh_token:
-            logger.info("🔄 Обновление просроченного токена...")
+        self.service = build("calendar", "v3", credentials=self.creds)
+        logger.info("Google Calendar API клиент готов к работе.")
+
+    def _ensure_token(self) -> None:
+        """
+        Проверяет состояние токена и выполняет обновление при необходимости.
+        """
+        if self.creds is None:
+            self._authorize()
+            return
+
+        if self.creds.expired and self.creds.refresh_token:
             self.creds.refresh(Request())
             with open(self.token_path, "wb") as f:
                 pickle.dump(self.creds, f)
-            logger.info("✅ Токен обновлён и сохранён.")
-        self.service = build("calendar", "v3", credentials=self.creds)
-        logger.info("Google Calendar API клиент готов к работе.")
+            self.service = build("calendar", "v3", credentials=self.creds)
+
+        if not self.creds.valid:
+            raise RuntimeError("Credentials invalid: recreate token with access_type='offline'")
 
     def list_events_between(
         self,
@@ -68,6 +79,7 @@ class GoogleCalendarClient:
         time_min = start.astimezone(self.tz).isoformat()
         time_max = end.astimezone(self.tz).isoformat()
 
+        self._ensure_token()
         events_result = (
             self.service.events()
             .list(
