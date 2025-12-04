@@ -52,7 +52,13 @@ class MultiCalendarManager:
         for cfg in self.clients.values():
             client = cfg["client"]
             for name, cid in cfg["calendars"].items():
-                events = client.list_events_between(cid, start, end)
+                try:
+                    events = client.list_events_between(cid, start, end)
+                except RuntimeError as e:
+                    if str(e) == "NEED_REAUTH":
+                        raise
+                    else:
+                        raise
                 for ev in events:
                     ev["calendar_name"] = name
                     all_events.append(ev)

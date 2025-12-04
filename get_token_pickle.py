@@ -29,14 +29,14 @@ def create_token(creds_path: str, token_path: str) -> None:
         else:
             logger.info("🌐 Создание нового токена через OAuth...")
             flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_local_server(port=0, access_type="offline", include_granted_scopes="true")
 
         with open(token_path, "wb") as token:
             pickle.dump(creds, token)
             logger.info(f"✅ Токен успешно сохранён: {token_path}")
     else:
         logger.info("✅ Существующий токен действителен — обновление не требуется.")
-
+    logger.info(creds.refresh_token)
     logger.info("🏁 Генерация токена завершена.")
 
 

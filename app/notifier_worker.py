@@ -80,7 +80,16 @@ class NotifierWorker:
         session = self.Session()
 
         try:
-            all_events = self.cal_client.list_all_events(now, window_end)
+            try:
+                all_events = self.cal_client.list_all_events(now, window_end)
+            except RuntimeError as e:
+                if str(e) == "NEED_REAUTH":
+                    await self.bot_app.bot.send_message(
+                        chat_id=self.chat_id,
+                        text="Google токен истёк или был отозван. Требуется повторная авторизация.",
+                    )
+                    return
+                raise
             for ev in all_events:
                 ev_hash = ev.get("ev_hash")
                 name = f"{ev.get('calendar_name')}"
