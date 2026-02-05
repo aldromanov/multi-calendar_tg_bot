@@ -1,25 +1,26 @@
 import datetime as dt
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from telegram import Update, BotCommand
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
-    CallbackQueryHandler,
 )
 
 from config import (
-    TELEGRAM_TOKEN,
+    BUTTON_TTL,
     CALENDAR_TOKENS,
+    NOTIFY_CHAT_ID,
+    NOTIFY_INTERVALS,
+    TELEGRAM_TOKEN,
     TZINFO,
     logger,
-    NOTIFY_CHAT_ID,
-    CHECK_INTERVAL,
 )
-from database import SessionLocal, SeenEvent
+from database import EventState, SeenEvent, SessionLocal
 from notifier_worker import NotifierWorker
-from utils import format_event, get_user_id
+from utils import EventStatus, build_message, format_event, get_user_id
 
 
 class TelegramBot:
@@ -48,7 +49,10 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("tomorrow", self.tomorrow))
         self.app.add_handler(CommandHandler("week", self.week))
         self.app.add_handler(CommandHandler("nextweek", self.nextweek))
-        self.app.add_handler(CallbackQueryHandler(self.confirm_event))
+
+        self.app.add_handler(CallbackQueryHandler(self.notify_callback, pattern=r"^notify:"))
+        self.app.add_handler(CallbackQueryHandler(self.notify_set_callback, pattern=r"^notify_set:"))
+        self.app.add_handler(CallbackQueryHandler(self.confirm_callback, pattern=r"^confirm:"))
 
         self.cal_manager = None
         self.scheduler = None
@@ -64,11 +68,11 @@ class TelegramBot:
         self.cal_manager = client_manager
         self.scheduler = AsyncIOScheduler()
         self.notifier = NotifierWorker(client_manager, self.app, NOTIFY_CHAT_ID, self.scheduler)
-        self.scheduler.add_job(self.notifier.check_and_notify, "interval", seconds=CHECK_INTERVAL)
+        self.scheduler.add_job(func=self.notifier.check_and_notify, trigger="cron", minute="*")
 
         async def start_scheduler():
             self.scheduler.start()
-            logger.info(f"Scheduler уведомлений запущен (интервал {CHECK_INTERVAL} сек.)")
+            logger.info("Scheduler уведомлений запущен (cron каждую минуту.)")
 
         self.start_scheduler_task = start_scheduler
 
@@ -106,7 +110,8 @@ class TelegramBot:
             "➡️ <b>/tomorrow</b> - события на <i>завтра</i>\n"
             "➡️ <b>/week</b> - события на <i>текущую неделю</i>\n"
             "➡️ <b>/nextweek</b> - события на <i>следующую неделю</i>\n\n"
-            "⏰ Также отправляю уведомления о предстоящих событиях \n"
+            "⏰ Также отправляю уведомления о предстоящих событиях с кнопками "
+            "«Уведомить» и «Подтвердить» \n"
         )
 
         if not update.message:
@@ -119,9 +124,93 @@ class TelegramBot:
         )
         logger.info(f"Команда /start от {get_user_id(update.effective_user)}")
 
-    async def confirm_event(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def notify_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
-        Обрабатывает подтверждение события пользователем (callback query).
+        Пользователь нажал кнопку "Уведомить" — показываем варианты времени уведомления.
+        """
+        query = update.callback_query
+        if not (query and query.message):
+            return
+
+        await query.answer()
+        ev_hash = query.data.split(":")[1]
+
+        session = SessionLocal()
+        try:
+            record = session.query(SeenEvent).get(ev_hash)
+            if not record:
+                return
+
+            now = dt.datetime.now(TZINFO)
+            minutes_left = max(int((record.start - now).total_seconds() // 60), 0)
+
+            valid_intervals = [m for m in NOTIFY_INTERVALS if m == 0 or m <= minutes_left]
+
+            if not valid_intervals:
+                await query.answer("Событие уже начинается", show_alert=True)
+                return
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "⏱ В момент события" if m == 0 else f"⏱ {m} мин",
+                            callback_data=f"notify_set:{ev_hash}:{m}",
+                        )
+                    ]
+                    for m in valid_intervals
+                ]
+            )
+
+            await query.edit_message_reply_markup(reply_markup=keyboard)
+
+            self.scheduler.add_job(
+                func=self._restore_original_buttons,
+                trigger="date",
+                run_date=now + dt.timedelta(seconds=BUTTON_TTL),
+                kwargs={
+                    "event_id": ev_hash,
+                    "message_id": query.message.message_id,
+                },
+            )
+
+        finally:
+            session.close()
+
+    async def notify_set_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Пользователь выбрал время уведомления — сохраняем next_notify_at.
+        Обновляет запись в базе данных и изменяет сообщение в чате.
+        Кнопки у сообщения убираем.
+        """
+        query = update.callback_query
+        if not query or not query.message:
+            return
+
+        await query.answer()
+
+        _, ev_hash, minutes_str = query.data.split(":")
+        minutes = int(minutes_str)
+
+        session = SessionLocal()
+        try:
+            record = session.query(SeenEvent).get(ev_hash)
+            if not record:
+                return
+
+            record.next_notify_at = record.start - dt.timedelta(minutes=minutes)
+            record.state = EventState.WAITING
+
+            session.commit()
+
+            await query.edit_message_reply_markup(reply_markup=None)
+
+        finally:
+            session.close()
+
+    async def confirm_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Пользователь нажал "Подтвердить" — событие подтверждено.
         Обновляет запись в базе данных и изменяет сообщение в чате.
         """
         query = update.callback_query
@@ -130,35 +219,30 @@ class TelegramBot:
             return
 
         await query.answer()
-        ev_hash = query.data
+        ev_hash = query.data.split(":")[1]
 
-        try:
-            with SessionLocal() as session:
-                updated = (
-                    session.query(SeenEvent)
-                    .filter_by(event_id=ev_hash)
-                    .update({"confirmed": True}, synchronize_session=False)
-                )
-                session.commit()
-
-            if updated:
-                logger.info(f"Событие {ev_hash} подтверждено пользователем {get_user_id(update.effective_user)}")
-            else:
-                logger.warning(f"Событие {ev_hash} не найдено для подтверждения")
-        except Exception as e:
-            logger.error(f"Ошибка при подтверждении события {ev_hash}: {e}", exc_info=True)
-            await query.answer("Ошибка при подтверждении события.")
+        session = SessionLocal()
+        record = session.query(SeenEvent).get(ev_hash)
+        if not record:
             return
+        try:
+            record.state = EventState.CONFIRMED
 
-        await query.answer("Событие подтверждено ✅")
-        await query.edit_message_reply_markup(reply_markup=None)
+            text = build_message(
+                status=EventStatus.CONFIRMED,
+                template=record.message_template,
+            )
 
-        new_text = self.notifier.format_confirmed_message(query.message.text or "")
-        await query.edit_message_text(
-            new_text,
-            parse_mode="HTML",
-            disable_web_page_preview=False,
-        )
+            await query.edit_message_text(
+                text=text,
+                parse_mode="HTML",
+                disable_web_page_preview=False,
+            )
+            await query.edit_message_reply_markup(reply_markup=None)
+
+            session.commit()
+        finally:
+            session.close()
 
     async def today(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Команда /today — показывает события на сегодня."""
@@ -262,3 +346,35 @@ class TelegramBot:
             logger.info(f"Отправлен список событий {label} пользователю {get_user_id(update.effective_user)}")
         else:
             await update.message.reply_text(f"Нет событий {label}.")
+
+    async def _restore_original_buttons(self, event_id: str, message_id: int):
+        """
+         Восстанавливает оригинальные кнопки уведомления и подтверждения, если событие ещё не подтверждено.
+
+        :param event_id: xэш события
+        :param message_id: ID сообщения Telegram
+        """
+        session = SessionLocal()
+        try:
+            record = session.query(SeenEvent).get(event_id)
+            if not record:
+                return
+
+            # если уже выбрали таймер / подтвердили — не трогаем
+            if record.state != EventState.ANNOUNCED:
+                return
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🔔 Уведомить", callback_data=f"notify:{event_id}")],
+                    [InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm:{event_id}")],
+                ]
+            )
+
+            await self.bot_app.bot.edit_message_reply_markup(
+                chat_id=NOTIFY_CHAT_ID,
+                message_id=message_id,
+                reply_markup=keyboard,
+            )
+        finally:
+            session.close()

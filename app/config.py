@@ -29,9 +29,9 @@ RAW_CALENDAR_TOKENS: str = os.environ.get("CALENDAR_TOKENS", "{}")
 CALENDAR_TOKENS: dict = json.loads(RAW_CALENDAR_TOKENS)
 
 # Scheduler / timing settings
-CHECK_INTERVAL: int = int(os.environ.get("CHECK_INTERVAL", "60"))
-AHEAD_HOUR: int = int(os.environ.get("AHEAD_HOUR", "8"))
-BUTTON_TTL: int = int(os.environ.get("BUTTON_TTL", "120"))
+AHEAD_HOUR: int = int(os.environ.get("AHEAD_HOUR", "2"))
+BUTTON_TTL: int = int(os.environ.get("BUTTON_TTL", "30"))
+NOTIFY_INTERVALS = [int(x) for x in os.getenv("NOTIFY_INTERVALS", "60,30,15,10,5,0").split(",")]
 
 # Timezone
 TIMEZONE: str = os.environ.get("TIMEZONE", "Europe/Moscow")

@@ -1,10 +1,19 @@
-import datetime as dt
-
 import asyncio
-from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Integer
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+import datetime as dt
+from enum import Enum
 
-from config import DATABASE_URL, logger, TZINFO
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Enum as SAEnum,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
+from config import DATABASE_URL, TZINFO, logger
 
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, future=True, echo=False)
@@ -13,6 +22,14 @@ SessionLocal = sessionmaker(
     expire_on_commit=False,
     future=True,
 )
+
+
+class EventState(Enum):
+    NEW = "new"  #  ещё не отправляли
+    ANNOUNCED = "announced"  # отправлено первое сообщение
+    WAITING = "waiting"  # ожидаем уведомление
+    CONFIRMED = "confirmed"  # подтверждено пользователем
+    STARTED = "started"  # событие началось
 
 
 class SeenEvent(Base):
@@ -28,14 +45,13 @@ class SeenEvent(Base):
     """
 
     __tablename__ = "seen_events"
-    event_id = Column(String, primary_key=True, index=True)
-    start = Column(DateTime(timezone=True))
-    notified_at = Column(
-        DateTime(timezone=True),
-        default=lambda: dt.datetime.now(TZINFO),
-    )
-    last_point = Column(Integer, nullable=True)
-    confirmed = Column(Boolean, default=False)
+
+    event_id = Column(String, primary_key=True)
+    start = Column(DateTime(timezone=True), nullable=False)
+    state = Column(SAEnum(EventState), nullable=False, default=EventState.NEW)
+    message_id = Column(Integer, nullable=True)
+    message_template = Column(Text, nullable=False)
+    next_notify_at = Column(DateTime(timezone=True), nullable=True)
 
 
 def init_db():
@@ -66,6 +82,9 @@ def clean_old_events(session: Session) -> int:
 
 
 async def weekly_cleanup():
+    """
+    Периодическая асинхронная очистка старых событий раз в неделю.
+    """
     while True:
         session = SessionLocal()
         try:

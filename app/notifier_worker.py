@@ -1,11 +1,12 @@
 import datetime as dt
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy.orm import Session
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, error
 from telegram.ext import Application
 
-from config import TZINFO, logger, BUTTON_TTL, AHEAD_HOUR
-from database import SessionLocal, SeenEvent
-from utils import format_event, get_notify_time
+from config import AHEAD_HOUR, TZINFO, logger
+from database import EventState, SeenEvent, SessionLocal
+from utils import EventStatus, build_message, format_event
 
 
 class NotifierWorker:
@@ -28,47 +29,48 @@ class NotifierWorker:
         self.scheduler = scheduler
         self.Session = SessionLocal
 
-    async def send_event_notification(self, ev: dict, name: str, session, icon: str, confirmable: bool) -> None:
+    async def send_event_notification(
+        self,
+        session: Session,
+        record: SeenEvent,
+        status: EventStatus,
+        with_buttons: bool,
+    ) -> Message:
         """
-        Отправка уведомления о событии в Telegram с кнопкой подтверждения.
-        """
-        ev_hash = ev.get("ev_hash")
-        record = session.query(SeenEvent).filter_by(event_id=ev_hash).first()
-        if record and record.confirmed:
-            session.close()
-            return
+        Отправляет уведомление о событии в Telegram.
 
-        event_text = format_event(ev)
-        label = "<b>Cобытие началось</b>" if icon == "🆘" else "<b>Скоро событие</b>"
-        html_text = f"{icon} {label}\n\n👤 <u><b>{name}</b></u>\n{event_text}"
+        :param session: SQLAlchemy сессия
+        :param record: объект события
+        :param status: статус события
+        :param with_buttons: нужно ли добавлять кнопки уведомления/подтверждения
+        :return: отправляет уведомление о событии в Telegram
+        """
+        text = build_message(
+            status=status,
+            template=record.message_template,
+        )
+
         keyboard = None
-        if confirmable:
+        if with_buttons:
             keyboard = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("✅ Подтвердить", callback_data=ev_hash)],
+                    [InlineKeyboardButton("🔔 Уведомить", callback_data=f"notify:{record.event_id}")],
+                    [InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm:{record.event_id}")],
                 ]
             )
 
         message = await self.bot_app.bot.send_message(
             chat_id=self.chat_id,
-            text=html_text,
+            text=text,
             reply_markup=keyboard,
             parse_mode="HTML",
             disable_web_page_preview=False,
         )
 
-        if confirmable:
-            self.scheduler.add_job(
-                self.bot_app.bot.edit_message_reply_markup,
-                "date",
-                run_date=dt.datetime.now() + dt.timedelta(seconds=BUTTON_TTL),
-                kwargs={
-                    "chat_id": self.chat_id,
-                    "message_id": message.message_id,
-                    "reply_markup": None,
-                },
-            )
-            logger.info(f"Задача удаления кнопки через {BUTTON_TTL} сек добавлена для {ev_hash}")
+        record.message_id = message.message_id
+        session.flush()
+
+        return message
 
     async def check_and_notify(self) -> None:
         """
@@ -90,75 +92,116 @@ class NotifierWorker:
                     )
                     return
                 raise
+
             for ev in all_events:
                 ev_hash = ev.get("ev_hash")
-                name = f"{ev.get('calendar_name')}"
                 if not ev_hash:
                     continue
 
-                record = session.query(SeenEvent).filter_by(event_id=ev_hash).first()
-
-                start_raw = ev.get("start")
-                if not start_raw:
-                    continue
-                start_dt = start_raw.astimezone(TZINFO)
-
-                if record and record.confirmed:
+                start_dt = ev.get("start")
+                if not start_dt:
                     continue
 
-                minutes_left = int((start_dt - now).total_seconds() / 60)
-                if minutes_left < 0:
+                start_dt = start_dt.astimezone(TZINFO)
+                calendar_name = ev.get("calendar_name", "")
+
+                record = session.query(SeenEvent).get(ev_hash)
+                event_text = format_event(ev)
+                message_template = f"👤 <u><b>{calendar_name}</b></u>\n{event_text}"
+
+                if not record:
+                    record = SeenEvent(
+                        event_id=ev_hash,
+                        start=start_dt,
+                        state=EventState.NEW,
+                        message_template=message_template,
+                    )
+                    session.add(record)
+
+                if record.state == EventState.CONFIRMED:
                     continue
 
-                send = False
-                confirmable = False
-                icon = "⏰"
+                if start_dt <= now and record.state != EventState.STARTED:
+                    record.state = EventState.STARTED
+                    await self.send_event_notification(
+                        session=session,
+                        record=record,
+                        status=EventStatus.STARTED,
+                        with_buttons=False,
+                    )
+                    continue
 
-                all_points = get_notify_time(AHEAD_HOUR)
-                next_point = next_point = next((p for p in all_points if p == minutes_left), None)
+                if record.state == EventState.NEW:
+                    record.state = EventState.ANNOUNCED
+                    await self.send_event_notification(
+                        session=session,
+                        record=record,
+                        status=EventStatus.ANNOUNCED,
+                        with_buttons=True,
+                    )
 
-                if next_point is not None:
-                    if not record or record.last_point is None or next_point < record.last_point:
-                        send = True
-                        if not record:
-                            record = SeenEvent(
-                                event_id=ev_hash,
-                                start=start_dt,
-                                last_point=next_point,
-                                notified_at=start_dt - dt.timedelta(minutes=next_point),
-                                confirmed=False,
-                            )
-                            session.add(record)
-                        else:
-                            record.last_point = next_point
-                            record.notified_at = start_dt - dt.timedelta(minutes=next_point)
+                    self.scheduler.add_job(
+                        func=self._auto_start_event,
+                        trigger="date",
+                        run_date=start_dt,
+                        kwargs={"event_id": ev_hash},
+                    )
 
-                if minutes_left > 60:
-                    icon = "⏰"
-                    confirmable = False
-                elif 0 < minutes_left <= 30:
-                    icon = "⚡"
-                    confirmable = True
-                elif minutes_left == 0:
-                    icon = "🆘"
-                    confirmable = False
-
-                if send:
-                    await self.send_event_notification(ev, name, session, icon, confirmable)
+                if record.state == EventState.WAITING and record.next_notify_at:
+                    if now >= record.next_notify_at:
+                        await self.send_event_notification(
+                            session=session,
+                            record=record,
+                            status=EventStatus.SOON,
+                            with_buttons=True,
+                        )
+                        record.next_notify_at = None
 
             session.commit()
         finally:
             session.close()
             logger.info("Проверка событий завершена.")
 
-    @staticmethod
-    def format_confirmed_message(original_text: str) -> str:
+    async def _auto_start_event(self, event_id: str) -> None:
         """
-        Возвращает отформатированный текст подтверждённого события.
+        Автоматическая обработка события при наступлении времени.
+        Меняет сообщение на 'Событие началось' и убирает кнопки, если пользователь не взаимодействовал.
+
+        :param event_id: xэш события для поиска в БД.
         """
-        parts = original_text.split("\n", 4)
-        header = parts[0].replace("⚡ Скоро событие", "🎯 <b>Событие подтверждено</b>")
-        sub = parts[2].split(" ", 1)
-        sub_header = f"{sub[0]} <u><b>{sub[1]}</b></u>"
-        text = f"<code>{parts[3]}</code>"
-        return f"{header}\n\n{sub_header}\n{text}"
+        session = self.Session()
+        try:
+            record = session.query(SeenEvent).get(event_id)
+            if not record or record.state in {EventState.CONFIRMED, EventState.STARTED}:
+                return
+
+            text = build_message(
+                status=EventStatus.SOON,
+                template=record.message_template,
+            )
+            try:
+                await self.bot_app.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=record.message_id,
+                    text=text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
+            except error.BadRequest as e:
+                if "Message is not modified" not in str(e):
+                    raise
+
+            try:
+                await self.bot_app.bot.edit_message_reply_markup(
+                    chat_id=self.chat_id,
+                    message_id=record.message_id,
+                    reply_markup=None,
+                )
+            except error.BadRequest as e:
+                if "Message is not modified" not in str(e):
+                    raise
+
+            record.state = EventState.STARTED
+            session.commit()
+        finally:
+            session.close()

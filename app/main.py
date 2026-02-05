@@ -1,7 +1,7 @@
 import asyncio
 
+from config import CALENDAR_TOKENS, logger
 from database import init_db, weekly_cleanup
-from config import logger, CALENDAR_TOKENS
 from multicalendar import MultiCalendarManager
 from telegram_bot import TelegramBot
 

@@ -1,12 +1,12 @@
 import os
-from typing import Dict, List, Any
+from typing import Any
 
-from config import logger, TOKENS_PATH
+from config import TOKENS_PATH, logger
 from google_calendar import GoogleCalendarClient
 
 
 class MultiCalendarManager:
-    def __init__(self, configs: Dict[str, Dict[str, Any]]):
+    def __init__(self, configs: dict[str, dict[str, Any]]):
         """
         Инициализация менеджера нескольких календарей.
 
@@ -14,10 +14,10 @@ class MultiCalendarManager:
                         где ключ — имя пользователя,
                         значение — словарь с ключами 'token' и 'calendars'
         """
-        self.clients: Dict[str, Dict[str, Any]] = {}
+        self.clients: dict[str, dict[str, Any]] = {}
         self._init_clients(configs)
 
-    def _create_client_for_user(self, user: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_client_for_user(self, user: str, data: dict[str, Any]) -> dict[str, Any]:
         """
         Создает клиента Google Calendar для одного пользователя.
 
@@ -31,7 +31,7 @@ class MultiCalendarManager:
         logger.info(f"Добавлен календарь пользователя {user} ({len(calendars)} календарей)")
         return {"client": client, "calendars": calendars}
 
-    def _init_clients(self, configs: Dict[str, Dict[str, Any]]) -> None:
+    def _init_clients(self, configs: dict[str, dict[str, Any]]) -> None:
         """
         Инициализирует всех клиентов для пользователей из конфигурации.
 
@@ -40,7 +40,7 @@ class MultiCalendarManager:
         for user, data in configs.items():
             self.clients[user] = self._create_client_for_user(user, data)
 
-    def list_all_events(self, start: str, end: str) -> List[Dict[str, Any]]:
+    def list_all_events(self, start: str, end: str) -> list[dict[str, Any]]:
         """
         Получает все события всех пользователей в заданном диапазоне дат.
 

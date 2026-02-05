@@ -7,7 +7,7 @@
 
 ## 🚀 Основные возможности
 
-- 🔔 Автоматические уведомления о приближающихся событиях из нескольких календарей.  
+- 🔔 Уведомления о событиях: автоматически за `AHEAD_HOUR` часов или вручную, выбирая интервал из `NOTIFY_INTERVALS` минут..  
 - 📆 Получение списка событий на:
   - Сегодня  
   - Завтра  
@@ -82,9 +82,9 @@ CALENDAR_TOKENS={
 }
 
 # Scheduler / timing settings
-CHECK_INTERVAL=60         # seconds between checks
-AHEAD_HOUR=8              # hour ahead to notify
-BUTTON_TTL=120            # seconds button lifetime
+AHEAD_HOUR=2                        # hour ahead to notify
+BUTTON_TTL=30                       # seconds button lifetime
+NOTIFY_INTERVALS=60,30,15,10,5,0    # notify interval seconds
 
 # Timezone
 TIMEZONE=Europe/Moscow
@@ -181,7 +181,6 @@ Requires=docker.service
 
 [Service]
 WorkingDirectory=/home/user/your_project
-ExecStartPre=/bin/bash -c 'sleep $((30 - $(date +%%S) % 60))'
 ExecStart=/usr/bin/docker-compose up
 ExecStop=/usr/bin/docker-compose down
 Restart=always
